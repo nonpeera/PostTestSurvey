@@ -1,0 +1,93 @@
+version: '3.8'
+
+services:
+  # Database
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: nlp_dashboard
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - app-network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - app-network
+
+  # Backend API
+  backend:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:password123@postgres:5432/nlp_dashboard
+      - REDIS_URL=redis://redis:6379
+      - GEMINI_API_KEY=AIzaSyDa9JTUR5j3sCo58T7b4h21ksXmCol3o_g
+      - LOG_LEVEL=INFO
+      - DEVELOPMENT_MODE=true
+      - PYTHONPATH=/app
+    volumes:
+      - ./backend:/app
+      - ./data:/app/data
+      - backend_cache:/root/.cache  # สำหรับ PyThaiNLP cache
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # Frontend (comment out ถ้าไม่ต้องการใช้ Docker)
+  frontend:
+    build: 
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - VITE_API_URL=http://localhost:8000
+      - NODE_ENV=development
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - frontend_cache:/app/.vite
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - app-network
+
+volumes:
+  postgres_data:
+    driver: local
+  backend_cache:
+    driver: local
+  frontend_cache:
+    driver: local
+
+networks:
+  app-network:
+    driver: bridge

@@ -1,0 +1,34 @@
+# FastAPI และ dependencies หลัก
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+
+# CORS และ middleware
+python-jose[cryptography]==3.3.0
+
+# Data processing
+pandas==2.1.3
+numpy==1.25.2
+openpyxl==3.1.2
+
+# Thai NLP (optional - จะใช้ fallback ถ้าไม่มี)
+pythainlp==5.1.2
+
+# Logging และ monitoring  
+loguru==0.7.2
+
+# Type hints
+typing-extensions==4.8.0
+
+# File handling
+aiofiles==23.2.1
+
+# Export functionality
+xlsxwriter==3.1.9
+
+# Development dependencies (optional)
+pytest==7.4.3
+pytest-asyncio==0.21.1
+# AI และ HTTP Client สำหรับ Gemini
+aiohttp>=3.8.0
+httpx>=0.24.0
