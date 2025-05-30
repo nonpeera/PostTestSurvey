@@ -136,7 +136,7 @@ async def startup_event():
     if NLP_PROCESSOR_CLASS:
         try:
             print("🔧 Creating NLP processor instance...")
-            nlp_processor = NLP_PROCESSOR_CLASS(analysis_method=2)  # เริ่มต้นด้วย Rule-based
+            nlp_processor = NLP_PROCESSOR_CLASS(analysis_method=2)  # Change method
             print("🔧 Initializing NLP processor...")
             await nlp_processor.initialize()
             print("✅ Enhanced NLP Processor initialized successfully")

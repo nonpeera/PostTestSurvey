@@ -9,11 +9,16 @@ const AIInsightsTab = ({ uploadData, interestTotal, positivePercent }) => {
         <h2 className="text-lg font-semibold text-gray-900">AI Insights & Recommendations</h2>
         <div className="flex items-center space-x-2">
           <div className="text-xs text-gray-500 bg-gray-100 px-3 py-1 rounded">
-            🤖 Enhanced AI Analysis v2.1
+            AI Analysis 
           </div>
           {insights?.ai_generated && (
             <div className="text-xs text-blue-600 bg-blue-100 px-3 py-1 rounded">
-              ✨ Gemini AI Enhanced
+              Gemini-2.0-flash
+            </div>
+          )}
+          {uploadData?.model_info?.method_name && (
+            <div className="text-xs text-purple-600 bg-purple-100 px-3 py-1 rounded">
+               {uploadData.model_info.method_name}
             </div>
           )}
         </div>
@@ -23,9 +28,45 @@ const AIInsightsTab = ({ uploadData, interestTotal, positivePercent }) => {
       {insights?.executive_summary && (
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
           <h3 className="font-semibold text-blue-800 mb-2 flex items-center">
-            <span className="mr-2">📋</span>สรุปผู้บริหาร
+            <span className="mr-2"></span>สรุปภาพรวม
           </h3>
           <p className="text-sm text-blue-700">{insights.executive_summary}</p>
+        </div>
+      )}
+
+      {/* Analysis Method Information */}
+      {uploadData?.model_info && (
+        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-6">
+          <h3 className="font-semibold text-gray-800 mb-3 flex items-center">
+            <span className="mr-2"></span>วิธีการวิเคราะห์
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+            <div>
+              <div className="font-medium text-gray-700">โมเดลที่ใช้</div>
+              <div className="text-gray-600">{uploadData.model_info.method_name || uploadData.model_info.engine}</div>
+            </div>
+          </div>
+          
+          {/* Available Methods */}
+          {uploadData.model_info.available_methods && (
+            <div className="mt-3 pt-3 border-t border-gray-300">
+              <div className="text-xs text-gray-600 mb-2">วิธีการวิเคราะห์ที่สามารถใช้ได้:</div>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(uploadData.model_info.available_methods).map(([id, method]) => (
+                  <span 
+                    key={id}
+                    className={`px-2 py-1 rounded text-xs ${
+                      parseInt(id) === uploadData.model_info.analysis_method
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-200 text-gray-700'
+                    }`}
+                  >
+                    {method.name}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -106,12 +147,12 @@ const AIInsightsTab = ({ uploadData, interestTotal, positivePercent }) => {
           {insights.system_strengths?.length > 0 && (
             <div className="border border-gray-200 rounded-lg p-4">
               <h3 className="font-semibold text-gray-800 mb-3 flex items-center">
-                <span className="mr-2">🌟</span>จุดเด่นของระบบ
+                <span className="mr-2"></span>จุดเด่นของระบบ
               </h3>
               <div className="text-sm text-gray-700 space-y-1">
                 {insights.system_strengths.map((strength, i) => (
                   <div key={i} className="flex items-start">
-                    <span className="mr-2 text-yellow-500">⭐</span><span>{strength}</span>
+                    <span className="mr-2 text-yellow-500">-</span><span>{strength}</span>
                   </div>
                 ))}
               </div>
@@ -121,12 +162,12 @@ const AIInsightsTab = ({ uploadData, interestTotal, positivePercent }) => {
           {insights.user_pain_points?.length > 0 && (
             <div className="border border-gray-200 rounded-lg p-4">
               <h3 className="font-semibold text-gray-800 mb-3 flex items-center">
-                <span className="mr-2">😣</span>ปัญหาที่ผู้ใช้พบ
+                <span className="mr-2"></span>ปัญหาที่ผู้ใช้พบ
               </h3>
               <div className="text-sm text-gray-700 space-y-1">
                 {insights.user_pain_points.map((pain, i) => (
                   <div key={i} className="flex items-start">
-                    <span className="mr-2 text-red-500">⚠️</span><span>{pain}</span>
+                    <span className="mr-2 text-red-500">-</span><span>{pain}</span>
                   </div>
                 ))}
               </div>
@@ -139,7 +180,7 @@ const AIInsightsTab = ({ uploadData, interestTotal, positivePercent }) => {
       {interestTotal.total > 0 && (
         <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-6">
           <h3 className="font-semibold text-purple-800 mb-3 flex items-center">
-            <span className="mr-2">🎯</span>การวิเคราะห์ความสนใจ
+            <span className="mr-2"></span>การวิเคราะห์ความสนใจ
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="text-center">
@@ -175,7 +216,7 @@ const AIInsightsTab = ({ uploadData, interestTotal, positivePercent }) => {
           <h3 className="font-semibold text-indigo-800 mb-3 flex items-center">
             <span className="mr-2">📈</span>การวิเคราะห์ความรู้สึกโดยรวม
           </h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="text-center">
               <div className="text-lg font-bold text-indigo-600">
                 {insights.sentiment_analysis.overall_mood || 'เป็นกลาง'}
@@ -188,65 +229,63 @@ const AIInsightsTab = ({ uploadData, interestTotal, positivePercent }) => {
               </div>
               <div className="text-sm text-indigo-700">ระดับความพึงพอใจ</div>
             </div>
-            <div className="text-center">
-              <div className="text-lg font-bold text-indigo-600">
-                {Math.round((insights.sentiment_analysis.confidence_score || 0.75) * 100)}%
-              </div>
-              <div className="text-sm text-indigo-700">ความมั่นใจในการวิเคราะห์</div>
-            </div>
           </div>
         </div>
       )}
 
-      {/* Summary Stats */}
+      {/* Summary Stats (เอาความมั่นใจออก) */}
       <div className="bg-gray-50 rounded-lg p-4 mb-6">
         <h3 className="text-base font-semibold mb-3 flex items-center">
           <span className="mr-2">📊</span>สรุปภาพรวม
         </h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-center">
           <div>
             <div className="text-2xl font-bold text-gray-900">{positivePercent}%</div>
             <div className="text-sm text-gray-600">ความพึงพอใจโดยรวม</div>
-          </div>
-          <div>
-            <div className="text-2xl font-bold text-gray-900">{uploadData.processing_summary?.nlp_accuracy || 'N/A'}</div>
-            <div className="text-sm text-gray-600">ความแม่นยำ AI</div>
           </div>
           <div>
             <div className="text-2xl font-bold text-gray-900">{uploadData.top_keywords?.length || 0}</div>
             <div className="text-sm text-gray-600">คำสำคัญที่สกัด</div>
           </div>
           <div>
-            <div className="text-2xl font-bold text-gray-900">{Math.round((uploadData.processing_summary?.confidence_avg || 0) * 100)}%</div>
-            <div className="text-sm text-gray-600">ความมั่นใจเฉลี่ย</div>
+            <div className="text-2xl font-bold text-gray-900">{uploadData.texts_analyzed || 0}</div>
+            <div className="text-sm text-gray-600">ข้อความที่วิเคราะห์</div>
           </div>
         </div>
       </div>
 
-      {/* AI Enhancement Notice */}
-      <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+      {/* Processing Information */}
+      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
         <div className="flex items-start">
           <div className="text-yellow-600 mr-3 text-lg flex-shrink-0">
-            {insights?.ai_generated ? '🤖' : '🚀'}
+            {insights?.ai_generated ? '-' : '-'}
           </div>
           <div>
             <h4 className="font-medium text-yellow-800 mb-1">
               {insights?.ai_generated ? 'AI-Enhanced Analysis' : 'การพัฒนา AI Insights เพิ่มเติม'}
             </h4>
-            <p className="text-sm text-yellow-700">
+            <p className="text-sm text-yellow-700 mb-2">
               {insights?.ai_generated ? (
                 `การวิเคราะห์นี้ได้รับการปรับปรุงด้วย ${insights.analysis_method || 'Gemini AI'} 
                 เพื่อให้ได้ข้อมูลเชิงลึกที่แม่นยำและครอบคลุมมากยิ่งขึ้น`
               ) : (
-                `ระบบกำลังเตรียม API Integration กับ Gemini AI เพื่อให้การวิเคราะห์ลึกขึ้น 
-                และข้อเสนอแนะที่ครอบคลุมมากยิ่งขึ้น ตอนนี้ใช้ Enhanced Rule-Based Analysis`
+                `ระบบใช้ ${uploadData?.model_info?.method_name || 'Enhanced Rule-Based Analysis'} 
+                สำหรับการวิเคราะห์ความรู้สึกและสกัดข้อมูลเชิงลึก`
               )}
             </p>
-            {uploadData.processing_summary?.ai_processing_time && (
-              <p className="text-xs text-yellow-600 mt-1">
-                เวลาประมวลผล AI: {uploadData.processing_summary.ai_processing_time}
-              </p>
-            )}
+            
+            {/* Processing Time Info */}
+            <div className="text-xs text-yellow-600 space-y-1">
+              {uploadData.processing_summary?.processing_time && (
+                <div>เวลาประมวลผล NLP: {uploadData.processing_summary.processing_time}</div>
+              )}
+              {uploadData.processing_summary?.ai_processing_time && (
+                <div>เวลาประมวลผล AI: {uploadData.processing_summary.ai_processing_time}</div>
+              )}
+              {uploadData.processing_summary?.method_used && (
+                <div>วิธีการ: {uploadData.processing_summary.method_used}</div>
+              )}
+            </div>
           </div>
         </div>
       </div>
