@@ -6,6 +6,7 @@ import warnings
 import re
 import os
 import json
+import aiohttp
 from collections import Counter
 from datetime import datetime
 
@@ -24,13 +25,37 @@ except ImportError as e:
 warnings.filterwarnings('ignore')
 
 class NLPProcessor:
-    def __init__(self):
-        self.models_path = "./data/models"
-        self.training_data_path = "./data/training"
-        self._ready = False
-        self.model_accuracy = 0.92
+    def __init__(self, analysis_method: int = 0):
+        """
+        Initialize NLP Processor
         
-        # คำบ่งชี้ความรู้สึกเฉพาะสำหรับ survey นี้
+        Args:
+            analysis_method (int): 
+                0 = Rule-based analysis (default)
+                1 = GzipModel trained analysis
+                2 = SSense API analysis (AI for Thai)
+        """
+        self.models_path = "./app/data/models"
+        self.training_data_path = "./app/data/training/"
+        self._ready = False
+        
+        # Analysis method selection
+        self.analysis_method = analysis_method
+        self.available_methods = {
+            0: {"name": "Rule-based", "function": "_analyze_sentiment_rule_based"},
+            1: {"name": "GzipModel", "function": "_analyze_sentiment_gzip_model"},
+            2: {"name": "SSense API", "function": "_analyze_sentiment_ssense"},
+        }
+        
+        # Trained model จาก GzipModel (สำหรับ method = 1)
+        self.trained_model = None
+        self.model_trained = False
+        
+        # SSense API configuration (สำหรับ method = 2)
+        self.ssense_api_key = "5Rx7TLNeMdtYyhub2A74VJ3HVLThqWRk"
+        self.ssense_url = "https://api.aiforthai.in.th/ssense"
+        
+        # คำบ่งชี้ความรู้สึกเฉพาะสำหรับ survey นี้ (สำหรับ fallback)
         self.positive_indicators = {
             'ดี', 'เยี่ยม', 'สุดยอด', 'ชอบ', 'เทพ', 'เจ๋ง', 'สะดวก', 'ง่าย', 
             'รวดเร็ว', 'ประทับใจ', 'พอใจ', 'ชัดเจน', 'เข้าใจง่าย', 'ใช้งานง่าย',
@@ -38,7 +63,7 @@ class NLPProcessor:
             'good', 'nice', 'great', 'excellent', 'แนะนำ', 'ชื่นชม', 'ยอดเยี่ยม',
             'คุ้นเคยกับข้อมูล', 'ไม่ต้องมาธนาคาร', 'อิเล็กทรอนิก', 'ถนัด', 'ไม่ยาก',
             'ไม่ซับซ้อน', 'ขั้นตอนน้อย', 'เร็ว', 'ทันใจ', 'มีประโยชน์', 'โอเค', 'ok',
-            'ได้', 'ปกติ', 'เหมาะสม', 'พอดี', 'ตรงตาม', 'ไม่สับสน', 'สนใจ'  # เพิ่ม "ไม่สับสน" และ "สนใจ"
+            'ได้', 'ปกติ', 'เหมาะสม', 'พอดี', 'ตรงตาม', 'ไม่สับสน', 'สนใจ'
         }
         
         self.negative_indicators = {
@@ -48,7 +73,7 @@ class NLPProcessor:
             'bad', 'terrible', 'horrible', 'ไม่สื่อ', 'ไม่ตรง', 'ไม่เหมาะ',
             'ปรับปรุง', 'แก้ไข', 'ต้องการเพิ่ม', 'ควรปรับ', 'ไม่มี', 'หาย',
             'ไม่สื่อความหมาย', 'ไม่ชัดเจน', 'ไม่เห็น', 'ไม่ครบ', 'ขาด', 'น้อย',
-            'ไม่เพียงพอ', 'ไม่ตรงกัน', 'ผิด', 'ใช้ไม่ได้', 'ไม่สนใจ'  # เพิ่ม "ไม่สนใจ"
+            'ไม่เพียงพอ', 'ไม่ตรงกัน', 'ผิด', 'ใช้ไม่ได้', 'ไม่สนใจ'
         }
         
         # คำที่เป็นกลาง
@@ -76,6 +101,7 @@ class NLPProcessor:
         """เตรียมระบบ NLP"""
         try:
             print("🚀 กำลังเตรียมระบบ Survey NLP Analysis...")
+            print(f"🎯 Analysis Method: {self.analysis_method} ({self.available_methods[self.analysis_method]['name']})")
             
             os.makedirs(self.models_path, exist_ok=True)
             os.makedirs(self.training_data_path, exist_ok=True)
@@ -86,17 +112,261 @@ class NLPProcessor:
                 try:
                     tokens = word_tokenize(test_text)
                     print(f"✅ PyThaiNLP พร้อมใช้งาน")
+                    
+                    # เตรียมโมเดลตาม method ที่เลือก
+                    await self._initialize_method()
+                    
                 except Exception as e:
                     print(f"⚠️ PyThaiNLP error: {e}")
+                    if self.analysis_method == 1:
+                        print("⚠️ GzipModel requires PyThaiNLP, switching to Rule-based")
+                        self.analysis_method = 0
             else:
-                print("⚠️ PyThaiNLP ไม่พร้อมใช้งาน - ใช้ basic tokenization")
+                print("⚠️ PyThaiNLP ไม่พร้อมใช้งาน")
+                if self.analysis_method == 1:
+                    print("⚠️ GzipModel requires PyThaiNLP, switching to Rule-based")
+                    self.analysis_method = 0
+            
+            # ทดสอบ SSense API ถ้าเลือก method 2
+            if self.analysis_method == 2:
+                await self._test_ssense_api()
             
             self._ready = True
-            print(f"✅ Survey NLP Processor พร้อมใช้งาน (ความแม่นยำ: {self.model_accuracy:.2%})")
+            method_name = self.available_methods[self.analysis_method]['name']
+            print(f"✅ Survey NLP Processor พร้อมใช้งาน ({method_name})")
             
         except Exception as e:
             print(f"❌ เกิดข้อผิดพลาด: {e}")
             self._ready = True  # ใช้งานได้แม้มีปัญหา
+    
+    async def _initialize_method(self):
+        """เตรียมโมเดลตาม analysis method ที่เลือก"""
+        if self.analysis_method == 0:
+            # Rule-based ไม่ต้องเตรียมอะไร
+            print("📋 Rule-based analysis ready")
+            
+        elif self.analysis_method == 1:
+            # GzipModel ต้องโหลดและเทรนโมเดล
+            await self._load_and_train_gzip_model()
+            
+        elif self.analysis_method == 2:
+            # SSense API ทดสอบการเชื่อมต่อ
+            print("🌐 Testing SSense API connection...")
+    
+    async def _test_ssense_api(self):
+        """ทดสอบการเชื่อมต่อ SSense API"""
+        try:
+            test_text = "ทดสอบระบบ"
+            headers = {
+                'Apikey': self.ssense_api_key
+            }
+            params = {'text': test_text}
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(self.ssense_url, headers=headers, params=params, timeout=10) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        print("✅ SSense API พร้อมใช้งาน")
+                        return True
+                    else:
+                        print(f"⚠️ SSense API error: {response.status}")
+                        print("🔄 จะใช้ Rule-based แทน")
+                        self.analysis_method = 0
+                        return False
+        except Exception as e:
+            print(f"⚠️ SSense API connection failed: {e}")
+            print("🔄 จะใช้ Rule-based แทน")
+            self.analysis_method = 0
+            return False
+    
+    def set_analysis_method(self, method: int) -> bool:
+        """เปลี่ยน analysis method"""
+        if method in self.available_methods:
+            self.analysis_method = method
+            print(f"🔄 เปลี่ยนเป็น {self.available_methods[method]['name']}")
+            return True
+        else:
+            print(f"❌ Invalid method {method}. Available: {list(self.available_methods.keys())}")
+            return False
+    
+    def get_available_methods(self) -> Dict[int, Dict[str, Any]]:
+        """ดูรายการ analysis methods ที่ใช้ได้"""
+        return self.available_methods.copy()
+    
+    async def _load_and_train_gzip_model(self):
+        """โหลดและเทรนโมเดล GzipModel (สำหรับ method = 1)"""
+        try:
+            print("🤖 กำลังโหลดข้อมูลสำหรับเทรน GzipModel...")
+            print(f"📂 ค้นหาข้อมูลเทรนใน: {self.training_data_path}")
+            
+            # ตรวจสอบว่าโฟลเดอร์มีอยู่หรือไม่
+            if not os.path.exists(self.training_data_path):
+                print(f"❌ ไม่พบโฟลเดอร์: {self.training_data_path}")
+                # ลองหาใน paths ทางเลือก
+                alternative_paths = [
+                    "/app/data/training",
+                    "./data/training", 
+                    "data/training",
+                    "/data/training"
+                ]
+                
+                for alt_path in alternative_paths:
+                    if os.path.exists(alt_path):
+                        print(f"✅ พบโฟลเดอร์ใน: {alt_path}")
+                        self.training_data_path = alt_path
+                        break
+                else:
+                    print("❌ ไม่พบโฟลเดอร์ data/training ใน paths ใดๆ")
+                    print("📁 ไฟล์และโฟลเดอร์ปัจจุบัน:")
+                    try:
+                        current_files = os.listdir(".")
+                        for f in current_files:
+                            print(f"  - {f}")
+                            if os.path.isdir(f) and f == "data":
+                                data_files = os.listdir(f)
+                                for df in data_files:
+                                    print(f"    - {f}/{df}")
+                                    if os.path.isdir(os.path.join(f, df)) and df == "training":
+                                        training_files = os.listdir(os.path.join(f, df))
+                                        for tf in training_files:
+                                            file_path = os.path.join(f, df, tf)
+                                            if os.path.isfile(file_path):
+                                                try:
+                                                    with open(file_path, 'r', encoding='utf-8') as temp_f:
+                                                        lines = temp_f.readlines()
+                                                        print(f"      - {tf}: {len(lines)} บรรทัด")
+                                                        # แสดง 3 บรรทัดแรก
+                                                        for i, line in enumerate(lines[:3]):
+                                                            print(f"        {i+1}: {line.strip()}")
+                                                except Exception as e:
+                                                    print(f"      - {tf}: ไม่สามารถอ่านได้ ({e})")
+                    except Exception as e:
+                        print(f"❌ ไม่สามารถแสดงรายการไฟล์: {e}")
+            
+            training_data = []
+            files_info = {}
+            
+            # โหลดข้อมูล positive
+            pos_file = os.path.join(self.training_data_path, "pos.txt")
+            print(f"🔍 ตรวจสอบไฟล์: {pos_file}")
+            if os.path.exists(pos_file):
+                try:
+                    with open(pos_file, 'r', encoding='utf-8') as f:
+                        lines = f.readlines()
+                        files_info['pos_total_lines'] = len(lines)
+                        valid_lines = 0
+                        for line_num, line in enumerate(lines, 1):
+                            line = line.strip()
+                            if line:
+                                training_data.append((line, "positive"))
+                                valid_lines += 1
+                            else:
+                                print(f"    บรรทัด {line_num}: ว่าง")
+                        print(f"📝 โหลดข้อมูล positive: {valid_lines}/{len(lines)} ประโยค (ข้าม {len(lines)-valid_lines} บรรทัดว่าง)")
+                        
+                        # แสดงตัวอย่างข้อมูล
+                        print("    ตัวอย่างข้อมูล positive:")
+                        pos_data = [x[0] for x in training_data if x[1] == "positive"]
+                        for i, example in enumerate(pos_data[:3]):
+                            print(f"      {i+1}: {example}")
+                            
+                except Exception as e:
+                    print(f"❌ เกิดข้อผิดพลาดในการอ่านไฟล์ pos.txt: {e}")
+            else:
+                print(f"❌ ไม่พบไฟล์: {pos_file}")
+            
+            # โหลดข้อมูล negative
+            neg_file = os.path.join(self.training_data_path, "neg.txt")
+            print(f"🔍 ตรวจสอบไฟล์: {neg_file}")
+            if os.path.exists(neg_file):
+                try:
+                    with open(neg_file, 'r', encoding='utf-8') as f:
+                        lines = f.readlines()
+                        files_info['neg_total_lines'] = len(lines)
+                        valid_lines = 0
+                        for line_num, line in enumerate(lines, 1):
+                            line = line.strip()
+                            if line:
+                                training_data.append((line, "negative"))
+                                valid_lines += 1
+                        print(f"📝 โหลดข้อมูล negative: {valid_lines}/{len(lines)} ประโยค")
+                        
+                        # แสดงตัวอย่างข้อมูล
+                        print("    ตัวอย่างข้อมูล negative:")
+                        neg_data = [x[0] for x in training_data if x[1] == "negative"]
+                        for i, example in enumerate(neg_data[:3]):
+                            print(f"      {i+1}: {example}")
+                            
+                except Exception as e:
+                    print(f"❌ เกิดข้อผิดพลาดในการอ่านไฟล์ neg.txt: {e}")
+            else:
+                print(f"❌ ไม่พบไฟล์: {neg_file}")
+            
+            # โหลดข้อมูล neutral
+            neu_file = os.path.join(self.training_data_path, "neu.txt")
+            print(f"🔍 ตรวจสอบไฟล์: {neu_file}")
+            if os.path.exists(neu_file):
+                try:
+                    with open(neu_file, 'r', encoding='utf-8') as f:
+                        lines = f.readlines()
+                        files_info['neu_total_lines'] = len(lines)
+                        valid_lines = 0
+                        for line_num, line in enumerate(lines, 1):
+                            line = line.strip()
+                            if line:
+                                training_data.append((line, "neutral"))
+                                valid_lines += 1
+                        print(f"📝 โหลดข้อมูล neutral: {valid_lines}/{len(lines)} ประโยค")
+                        
+                        # แสดงตัวอย่างข้อมูล
+                        print("    ตัวอย่างข้อมูล neutral:")
+                        neu_data = [x[0] for x in training_data if x[1] == "neutral"]
+                        for i, example in enumerate(neu_data[:3]):
+                            print(f"      {i+1}: {example}")
+                            
+                except Exception as e:
+                    print(f"❌ เกิดข้อผิดพลาดในการอ่านไฟล์ neu.txt: {e}")
+            else:
+                print(f"❌ ไม่พบไฟล์: {neu_file}")
+            
+            print(f"📊 รวมข้อมูลเทรนทั้งหมด: {len(training_data)} ประโยค")
+            print(f"📊 สรุปไฟล์: {files_info}")
+            
+            # ถ้าไม่มีข้อมูลเลย หรือมีน้อยมาก
+            if len(training_data) == 0:
+                print("❌ ไม่พบข้อมูลเทรนเลย กำลังสร้างข้อมูลตัวอย่าง...")
+                training_data = await self._create_sample_training_data()
+            elif len(training_data) < 50 and len(training_data) > 0:
+                print(f"⚠️ ข้อมูลเทรนมีเพียง {len(training_data)} ประโยค จะเพิ่มข้อมูลตัวอย่าง...")
+                # เก็บข้อมูลจริงไว้ แล้วเพิ่มข้อมูลตัวอย่าง
+                real_data = training_data.copy()
+                sample_data = await self._create_sample_training_data()
+                training_data.extend(sample_data)
+                print(f"📊 ข้อมูลหลังเพิ่มตัวอย่าง: {len(training_data)} ประโยค (จริง: {len(real_data)}, ตัวอย่าง: {len(sample_data)})")
+            
+            if len(training_data) > 0:
+                print(f"🎯 เริ่มเทรน GzipModel ด้วยข้อมูล {len(training_data)} ประโยค...")
+                
+                # สร้างและเทรน GzipModel
+                self.trained_model = GzipModel(training_data)
+                self.model_trained = True
+                
+                # ทดสอบโมเดล
+                test_result = self.trained_model.predict("ระบบใช้งานง่ายมาก", k=1)
+                print(f"🧪 ทดสอบโมเดล: 'ระบบใช้งานง่ายมาก' -> {test_result}")
+                
+                print(f"✅ เทรน GzipModel สำเร็จ!")
+                
+            else:
+                print("❌ ไม่พบข้อมูลเทรน จะสลับไปใช้ rule-based")
+                self.analysis_method = 0
+                
+        except Exception as e:
+            print(f"⚠️ เกิดข้อผิดพลาดในการเทรน GzipModel: {e}")
+            import traceback
+            traceback.print_exc()
+            print("Will fallback to rule-based analysis")
+            self.analysis_method = 0
     
     def _tokenize_thai(self, text: str) -> List[str]:
         """แบ่งคำภาษาไทย"""
@@ -126,7 +396,7 @@ class NLPProcessor:
             return text
     
     def _analyze_sentiment_rule_based(self, text: str) -> Dict[str, Any]:
-        """วิเคราะห์ sentiment ด้วย rule-based approach"""
+        """วิเคราะห์ sentiment ด้วย rule-based approach (Method 0)"""
         try:
             text_lower = text.lower()
             tokens = self._tokenize_thai(text_lower)
@@ -140,7 +410,7 @@ class NLPProcessor:
             
             # ตรวจสอบคำเฉพาะก่อน
             if "ไม่สับสน" in text_lower:
-                positive_count += 2  # ให้น้ำหนักมากเพราะเป็นความหมายที่ชัดเจน
+                positive_count += 2
                 positive_words.append("ไม่สับสน")
             elif "สับสน" in text_lower and "ไม่" not in text_lower:
                 negative_count += 1
@@ -161,47 +431,171 @@ class NLPProcessor:
             if total_sentiment == 0:
                 if any(word in text_lower for word in ['ต้องการ', 'ควร', 'ปรับปรุง', 'เพิ่ม', 'แก้ไข']):
                     sentiment = "negative"
-                    confidence = 0.6
                 elif any(word in text_lower for word in ['ไม่มี', 'ไม่ใส่', 'ไม่ตอบ', '-']):
                     sentiment = "neutral"
-                    confidence = 0.7
                 else:
                     sentiment = "neutral"
-                    confidence = 0.5
             else:
                 if positive_count > negative_count:
                     sentiment = "positive"
-                    confidence = min(0.9, 0.7 + (positive_count - negative_count) * 0.1)
                 elif negative_count > positive_count:
                     sentiment = "negative"
-                    confidence = min(0.9, 0.7 + (negative_count - positive_count) * 0.1)
                 else:
                     sentiment = "neutral"
-                    confidence = 0.6
             
             return {
                 "sentiment": sentiment,
-                "confidence": confidence,
                 "positive_indicators": positive_count,
                 "negative_indicators": negative_count,
                 "neutral_indicators": neutral_count,
                 "positive_words": positive_words,
                 "negative_words": negative_words,
-                "method": "rule_based"
+                "method": "rule_based",
+                "method_id": 0
             }
             
         except Exception as e:
-            print(f"Error in sentiment analysis: {e}")
+            print(f"Error in rule-based sentiment analysis: {e}")
             return {
                 "sentiment": "neutral",
-                "confidence": 0.5,
                 "positive_indicators": 0,
                 "negative_indicators": 0,
                 "neutral_indicators": 0,
                 "positive_words": [],
                 "negative_words": [],
-                "method": "error"
+                "method": "rule_based_error",
+                "method_id": 0
             }
+    
+    def _analyze_sentiment_gzip_model(self, text: str) -> Dict[str, Any]:
+        """วิเคราะห์ sentiment ด้วย GzipModel (Method 1)"""
+        try:
+            if not self.trained_model or not self.model_trained:
+                # Fallback to rule-based if model not available
+                print("⚠️ GzipModel not available, falling back to rule-based")
+                return self._analyze_sentiment_rule_based(text)
+            
+            # ใช้โมเดลที่เทรนแล้ว
+            predicted_sentiment = self.trained_model.predict(text, k=1)
+            
+            # คำนวณ rule-based เป็นตัวช่วยตรวจสอบ
+            rule_result = self._analyze_sentiment_rule_based(text)
+            
+            return {
+                "sentiment": predicted_sentiment,
+                "positive_indicators": rule_result.get("positive_indicators", 0),
+                "negative_indicators": rule_result.get("negative_indicators", 0),
+                "neutral_indicators": rule_result.get("neutral_indicators", 0),
+                "positive_words": rule_result.get("positive_words", []),
+                "negative_words": rule_result.get("negative_words", []),
+                "method": "gzip_model",
+                "method_id": 1,
+                "model_prediction": predicted_sentiment,
+                "rule_prediction": rule_result["sentiment"],
+                "agreement": predicted_sentiment == rule_result["sentiment"]
+            }
+            
+        except Exception as e:
+            print(f"Error in GzipModel analysis: {e}")
+            # Fallback to rule-based
+            return self._analyze_sentiment_rule_based(text)
+    
+    async def _analyze_sentiment_ssense(self, text: str) -> Dict[str, Any]:
+        """วิเคราะห์ sentiment ด้วย SSense API (Method 2)"""
+        try:
+            headers = {
+                'Apikey': self.ssense_api_key
+            }
+            params = {'text': text}
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(self.ssense_url, headers=headers, params=params, timeout=10) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        
+                        # แปลงผลลัพธ์จาก SSense
+                        sentiment_data = result.get('sentiment', {})
+                        polarity = sentiment_data.get('polarity', '')
+                        
+                        if polarity == 'positive':
+                            sentiment = "positive"
+                        elif polarity == 'negative':
+                            sentiment = "negative"
+                        else:
+                            sentiment = "neutral"
+                        
+                        # ดึงข้อมูลเพิ่มเติมจาก preprocess
+                        preprocess_data = result.get('preprocess', {})
+                        positive_words = preprocess_data.get('pos', [])
+                        negative_words = preprocess_data.get('neg', [])
+                        keywords = preprocess_data.get('keyword', [])
+                        
+                        # ดึงข้อมูลจาก intention
+                        intention_data = result.get('intention', {})
+                        
+                        return {
+                            "sentiment": sentiment,
+                            "positive_indicators": len(positive_words),
+                            "negative_indicators": len(negative_words),
+                            "neutral_indicators": 0,
+                            "positive_words": positive_words,
+                            "negative_words": negative_words,
+                            "keywords": keywords,
+                            "method": "ssense_api",
+                            "method_id": 2,
+                            "ssense_polarity": polarity,
+                            "ssense_intention": intention_data,
+                            "ssense_raw": result
+                        }
+                        
+                    else:
+                        print(f"⚠️ SSense API error: {response.status}")
+                        # Fallback to rule-based
+                        result = self._analyze_sentiment_rule_based(text)
+                        result["method"] = "ssense_fallback_rule"
+                        result["method_id"] = 2
+                        return result
+                        
+        except Exception as e:
+            print(f"Error in SSense API analysis: {e}")
+            # Fallback to rule-based
+            result = self._analyze_sentiment_rule_based(text)
+            result["method"] = "ssense_fallback_error"
+            result["method_id"] = 2
+            return result
+    
+    def analyze_sentiment(self, text: str) -> Dict[str, Any]:
+        """วิเคราะห์ sentiment ด้วยวิธีที่เลือกไว้"""
+        # เลือก method ตามที่กำหนด
+        method_info = self.available_methods[self.analysis_method]
+        method_function = getattr(self, method_info["function"])
+        
+        if self.analysis_method == 2:
+            # SSense API ต้องใช้ async - แต่ถ้า event loop ทำงานอยู่แล้วให้ fallback
+            try:
+                import asyncio
+                
+                # ตรวจสอบว่ามี event loop ทำงานอยู่หรือไม่
+                try:
+                    loop = asyncio.get_running_loop()
+                    # ถ้ามี loop ทำงานอยู่ ให้ใช้ create_task หรือ fallback
+                    print("⚠️ Event loop is running, using synchronous fallback for SSense")
+                    # Fallback to rule-based
+                    return self._analyze_sentiment_rule_based(text)
+                except RuntimeError:
+                    # ไม่มี loop ทำงานอยู่ สามารถสร้างใหม่ได้
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        return loop.run_until_complete(method_function(text))
+                    finally:
+                        loop.close()
+                        
+            except Exception as e:
+                print(f"Error in SSense API: {e}, falling back to rule-based")
+                return self._analyze_sentiment_rule_based(text)
+        else:
+            return method_function(text)
     
     def _extract_keywords_advanced(self, text: str) -> List[Dict]:
         """สกัดคำสำคัญขั้นสูง"""
@@ -278,7 +672,6 @@ class NLPProcessor:
         if not text or not text.strip():
             return {
                 "sentiment": "neutral",
-                "confidence": 0.0,
                 "keywords": [],
                 "text": text,
                 "column": column_name
@@ -290,18 +683,23 @@ class NLPProcessor:
             if not processed_text:
                 return {
                     "sentiment": "neutral",
-                    "confidence": 0.0,
                     "keywords": [],
                     "text": text,
                     "column": column_name
                 }
             
-            sentiment_result = self._analyze_sentiment_rule_based(processed_text)
+            # ใช้ method ที่เลือกไว้ - แยกการจัดการ async/sync
+            if self.analysis_method == 2:
+                # SSense API method - เรียกโดยตรง
+                sentiment_result = await self._analyze_sentiment_ssense(processed_text)
+            else:
+                # Rule-based หรือ GzipModel
+                sentiment_result = self.analyze_sentiment(processed_text)
+            
             keywords = self._extract_keywords_advanced(processed_text)
             
             return {
                 "sentiment": sentiment_result["sentiment"],
-                "confidence": sentiment_result["confidence"],
                 "keywords": keywords,
                 "text": text,
                 "column": column_name,
@@ -311,7 +709,10 @@ class NLPProcessor:
                     "negative_indicators": sentiment_result.get("negative_indicators", 0),
                     "positive_words": sentiment_result.get("positive_words", []),
                     "negative_words": sentiment_result.get("negative_words", []),
-                    "method": sentiment_result.get("method", "unknown")
+                    "method": sentiment_result.get("method", "unknown"),
+                    "method_id": sentiment_result.get("method_id", self.analysis_method),
+                    "analysis_method": self.analysis_method,
+                    "ssense_raw": sentiment_result.get("ssense_raw") if self.analysis_method == 2 else None
                 }
             }
             
@@ -319,7 +720,6 @@ class NLPProcessor:
             print(f"Error analyzing text: {e}")
             return {
                 "sentiment": "neutral",
-                "confidence": 0.0,
                 "keywords": [],
                 "text": text,
                 "column": column_name
@@ -672,7 +1072,8 @@ class NLPProcessor:
     async def analyze_survey(self, df: pd.DataFrame, analysis_id: str) -> Dict[str, Any]:
         """วิเคราะห์แบบสอบถาม Post-Test Survey แบบครบถ้วน"""
         print(f"🎯 เริ่มวิเคราะห์ Post-Test Survey ID: {analysis_id}")
-        print(f"📊 ใช้ Enhanced Rule-Based NLP (ความแม่นยำ: {self.model_accuracy:.2%})")
+        method_name = self.available_methods[self.analysis_method]['name']
+        print(f"📊 ใช้ {method_name} (Method {self.analysis_method})")
         print(f"📏 ข้อมูล: {df.shape[0]} แถว, {df.shape[1]} คอลัมน์")
         
         results = {
@@ -683,11 +1084,13 @@ class NLPProcessor:
             "detailed_results": [],
             "column_analysis": {},
             "model_info": {
-                "accuracy": f"{self.model_accuracy:.2%}",
-                "engine": "Enhanced Rule-Based NLP",
+                "engine": method_name,
                 "preprocessing": "Thai tokenization + Advanced sentiment rules",
                 "features": "Survey-specific keyword analysis + POS enhancement",
-                "version": "Post-Test Survey Optimized v2.1"
+                "version": "Post-Test Survey Optimized v3.0 + Multiple Methods",
+                "analysis_method": self.analysis_method,
+                "method_name": method_name,
+                "available_methods": self.get_available_methods()
             },
             "insights": {}
         }
@@ -704,7 +1107,7 @@ class NLPProcessor:
         # วิเคราะห์ Choice questions
         choice_analysis = self._analyze_choice_questions(df)
         results["choice_analysis"] = choice_analysis
-        print(f"☑️ พบ Choice questions: {len(choice_analysis)} คอลัมน์")
+        print(f"☑️ พบ Choice questions: {len(choice_analysis)} คำถาม")
         
         # วิเคราะห์ข้อความ
         all_keywords = {}
@@ -816,9 +1219,219 @@ class NLPProcessor:
         print(f"  🔑 Keywords: {len(results['top_keywords'])} คำสำคัญ")
         print(f"  📏 Likert scales: {len(likert_analysis)} คำถาม")
         print(f"  ☑️ Choice questions: {len(choice_analysis)} คำถาม")
+        print(f"  🤖 โมเดลที่ใช้: {method_name} (Method {self.analysis_method})")
         
         return results
     
     def is_ready(self) -> bool:
         """ตรวจสอบว่าระบบพร้อมใช้งาน"""
         return self._ready
+    
+    def get_model_info(self) -> Dict[str, Any]:
+        """ข้อมูลเกี่ยวกับโมเดลที่ใช้งาน"""
+        method_info = self.available_methods[self.analysis_method]
+        
+        return {
+            "analysis_method": self.analysis_method,
+            "method_name": method_info["name"],
+            "pythainlp_available": PYTHAINLP_AVAILABLE,
+            "training_data_path": self.training_data_path,
+            "models_path": self.models_path,
+            "available_methods": self.get_available_methods(),
+            "features": {   
+                "thai_tokenization": PYTHAINLP_AVAILABLE,
+                "pos_tagging": PYTHAINLP_AVAILABLE,
+                "gzip_model": self.analysis_method == 1 and self.model_trained,
+                "ssense_api": self.analysis_method == 2,
+                "rule_based": True,
+                "survey_specific_keywords": True,
+                "advanced_preprocessing": True,
+                "method_switching": True
+            },
+            "method_specific": {
+                "gzip_trained": self.model_trained if self.analysis_method == 1 else False,
+                "training_data_available": os.path.exists(os.path.join(self.training_data_path, "pos.txt")),
+                "ssense_api_key": bool(self.ssense_api_key) if self.analysis_method == 2 else False
+            }
+        }
+    
+    async def retrain_model(self, new_training_data: List[Tuple[str, str]] = None) -> bool:
+        """เทรนโมเดลใหม่ด้วยข้อมูลใหม่ (สำหรับ GzipModel เท่านั้น)"""
+        try:
+            if self.analysis_method != 1:
+                print(f"❌ การเทรนโมเดลใหม่ใช้ได้เฉพาะ GzipModel (Method 1) เท่านั้น")
+                print(f"   ปัจจุบันใช้ {self.available_methods[self.analysis_method]['name']} (Method {self.analysis_method})")
+                return False
+                
+            if not PYTHAINLP_AVAILABLE:
+                print("❌ PyThaiNLP ไม่พร้อมใช้งาน ไม่สามารถเทรนโมเดลได้")
+                return False
+            
+            print("🔄 กำลังเทรน GzipModel ใหม่...")
+            
+            # ใช้ข้อมูลที่ส่งมา หรือโหลดจากไฟล์
+            if new_training_data:
+                training_data = new_training_data
+                print(f"📝 ใช้ข้อมูลใหม่: {len(training_data)} ประโยค")
+            else:
+                # โหลดข้อมูลจากไฟล์อีกครั้ง
+                await self._load_and_train_gzip_model()
+                return self.model_trained
+            
+            # สร้างโมเดลใหม่
+            self.trained_model = GzipModel(training_data)
+            self.model_trained = True
+            
+            print(f"✅ เทรน GzipModel ใหม่สำเร็จ!")
+            return True
+            
+        except Exception as e:
+            print(f"❌ เกิดข้อผิดพลาดในการเทรนโมเดลใหม่: {e}")
+            return False
+    
+    async def predict_sentiment_async(self, text: str) -> Dict[str, Any]:
+        """ทำนาย sentiment สำหรับข้อความเดี่ยว (async version)"""
+        try:
+            processed_text = self._preprocess_text(text)
+            
+            if self.analysis_method == 2:
+                # SSense API method
+                result = await self._analyze_sentiment_ssense(processed_text)
+            else:
+                # Rule-based หรือ GzipModel
+                result = self.analyze_sentiment(processed_text)
+            
+            return {
+                "text": text,
+                "processed_text": processed_text,
+                "predicted_sentiment": result["sentiment"],
+                "method": result.get("method", "unknown"),
+                "method_id": result.get("method_id", self.analysis_method),
+                "analysis_method": self.analysis_method,
+                "method_name": self.available_methods[self.analysis_method]["name"],
+                "ssense_data": result.get("ssense_raw") if self.analysis_method == 2 else None
+            }
+            
+        except Exception as e:
+            return {
+                "text": text,
+                "error": str(e),
+                "predicted_sentiment": "neutral",
+                "analysis_method": self.analysis_method
+            }
+    
+    def predict_sentiment(self, text: str) -> Dict[str, Any]:
+        """ทำนาย sentiment สำหรับข้อความเดี่ยว (สำหรับทดสอบ)"""
+        try:
+            processed_text = self._preprocess_text(text)
+            
+            # สำหรับ SSense API ให้ fallback เป็น rule-based ใน sync context
+            if self.analysis_method == 2:
+                print("⚠️ SSense API not available in sync context, using rule-based fallback")
+                original_method = self.analysis_method
+                self.analysis_method = 0
+                result = self.analyze_sentiment(processed_text)
+                self.analysis_method = original_method
+                result["method"] = "ssense_sync_fallback"
+            else:
+                result = self.analyze_sentiment(processed_text)
+            
+            return {
+                "text": text,
+                "processed_text": processed_text,
+                "predicted_sentiment": result["sentiment"],
+                "method": result.get("method", "unknown"),
+                "method_id": result.get("method_id", self.analysis_method),
+                "analysis_method": self.analysis_method,
+                "method_name": self.available_methods[self.analysis_method]["name"]
+            }
+            
+        except Exception as e:
+            return {
+                "text": text,
+                "error": str(e),
+                "predicted_sentiment": "neutral",
+                "analysis_method": self.analysis_method
+            }
+    
+    async def _create_sample_training_data(self) -> List[Tuple[str, str]]:
+        """สร้างข้อมูลตัวอย่างสำหรับเทรนโมเดล"""
+        sample_data = [
+            # Positive samples
+            ("ระบบใช้งานง่ายมาก", "positive"),
+            ("สะดวกสบาย ไม่ต้องมาธนาคาร", "positive"),
+            ("เร็วดี ประหยัดเวลา", "positive"),
+            ("ชอบมาก แนะนำเลย", "positive"),
+            ("ใช้งานได้ดีมาก", "positive"),
+            
+            # Negative samples  
+            ("ช้ามาก สับสนมาก", "negative"),
+            ("ยุ่งยาก ไม่เข้าใจ", "negative"),
+            ("ปุ่มแก้ไขหายาก", "negative"),
+            ("ภาษาไทยไม่สื่อความหมาย", "negative"),
+            ("ควรปรับปรุงระบบ", "negative"),
+            
+            # Neutral samples
+            ("ปกติ ไม่มีอะไร", "neutral"),
+            ("ใช้ได้ พอใช้", "neutral"),
+            ("ไม่มีความคิดเห็น", "neutral"),
+            ("ทดสอบระบบ", "neutral"),
+            ("ข้อมูลทั่วไป", "neutral")
+        ]
+        
+        print(f"📝 สร้างข้อมูลตัวอย่าง: {len(sample_data)} ประโยค")
+        return sample_data
+
+
+# ตัวอย่างการใช้งาน
+async def main():
+    """ตัวอย่างการใช้งาน Enhanced NLP Processor with SSense API"""
+    
+    print("🚀 ทดสอบ NLP Processor with Multiple Methods\n")
+    
+    # ทดสอบทั้ง 3 methods
+    for method in [0, 1, 2]:
+        print(f"\n{'='*60}")
+        print(f"🧪 ทดสอบ Method {method}: {['Rule-based', 'GzipModel', 'SSense API'][method]}")
+        print(f"{'='*60}")
+        
+        # สร้าง processor
+        processor = NLPProcessor(analysis_method=method)
+        
+        # เตรียมระบบ
+        await processor.initialize()
+        
+        # ข้อมูลโมเดล
+        model_info = processor.get_model_info()
+        print(f"\n📋 ข้อมูลโมเดล:")
+        print(f"   Method: {model_info['method_name']} (ID: {model_info['analysis_method']})")
+        print(f"   PyThaiNLP: {'✅' if model_info['pythainlp_available'] else '❌'}")
+        
+        # ทดสอบ sentiment analysis
+        test_texts = [
+            "ระบบใช้งานง่ายมาก ชอบเลย",
+            "ช้ามาก สับสนมาก", 
+            "ปกติ ไม่มีอะไร",
+            "ปุ่มแก้ไขหายาก ควรปรับปรุง",
+            "สะดวกสบาย ไม่ต้องมาธนาคาร"
+        ]
+        
+        print(f"\n🧪 ทดสอบการวิเคราะห์ sentiment:")
+        for text in test_texts:
+            result = processor.predict_sentiment(text)
+            print(f"  📝 '{text}'")
+            print(f"     → {result['predicted_sentiment']}")
+            print(f"     → วิธี: {result['method']}")
+        
+        # ทดสอบการเปลี่ยน method
+        available_methods = processor.get_available_methods()
+        print(f"\n🔄 Methods ที่ใช้ได้: {list(available_methods.keys())}")
+        for mid, minfo in available_methods.items():
+            print(f"   {mid}: {minfo['name']}")
+    
+    print(f"\n{'='*60}")
+    print("✅ การทดสอบเสร็จสิ้น!")
+    print(f"{'='*60}")
+
+if __name__ == "__main__":
+    asyncio.run(main())

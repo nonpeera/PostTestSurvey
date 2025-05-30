@@ -24,25 +24,11 @@ class GeminiAIService:
         # Model priority list (เลือกแค่ที่เร็วและเสถียร)
         self.models = [
             {
-                "name": "gemini-2.5-flash-preview-05-20", 
-                "description": "Fast and adaptive",
-                "timeout": 30,
-                "max_tokens": 1500,  # ลดลงเพราะ response แต่ละครั้งเล็กลง
-                "temperature": 0.2
-            },
-            {
                 "name": "gemini-2.0-flash",
                 "description": "Next generation features",
                 "timeout": 25,
                 "max_tokens": 1200,
                 "temperature": 0.2
-            },
-            {
-                "name": "gemini-1.5-flash",
-                "description": "Fast and versatile",
-                "timeout": 20,
-                "max_tokens": 1000,
-                "temperature": 0.3
             }
         ]
         
@@ -335,7 +321,7 @@ class GeminiAIService:
         prompt = f"""สร้าง Executive Summary จากผลการวิเคราะห์:
 
 📊 ข้อมูลพื้นฐาน:
-- ผู้ตอบ: {total_feedback} คำตอบ
+- ผู้ตอบ 31 คน: {total_feedback} คำตอบ
 - ความพึงพอใจ: {positive_rate:.1f}%
 - ระดับความพึงพอใจ: {insights.get('sentiment_analysis', {}).get('satisfaction_level', 'ปานกลาง')}
 

@@ -49,7 +49,8 @@ services:
       - PYTHONPATH=/app
     volumes:
       - ./backend:/app
-      - ./data:/app/data
+      - ./data:/app/data  
+      - ./data:/app/data/training
       - backend_cache:/root/.cache  # สำหรับ PyThaiNLP cache
     depends_on:
       postgres:
